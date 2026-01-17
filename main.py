@@ -37,7 +37,7 @@ st.markdown("""
 
     .hero-subtitle {
         font-size: 1.5rem;
-        color: #CBD5E1;
+        color: #000000;
         margin-bottom: 3rem;
         text-align: center;
     }

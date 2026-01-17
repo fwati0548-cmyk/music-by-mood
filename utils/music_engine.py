@@ -1,7 +1,7 @@
 """
-Music Recommendation Engine
-Location: utils/music_engine.py
-Target Data: data/music/dataset.csv
+Music Recommendation Engine - VERSION 2.5
+- Lokasi: utils/music_engine.py
+- Fitur: Weighted Random Sampling (Prioritas Popularitas Tinggi + Tetap Variatif)
 """
 
 import pandas as pd
@@ -22,10 +22,8 @@ class MusicRecommendationEngine:
     @st.cache_resource
     def _load_data(_self):
         try:
-            # current_dir adalah folder 'utils'
             current_dir = os.path.dirname(__file__)
-            
-            # Keluar dari utils (..), masuk ke data/music
+            # Path sesuai struktur: naik ke streamlit_app, masuk ke data/music
             data_dir = os.path.normpath(os.path.join(current_dir, "..", "data", "music"))
             dataset_path = os.path.join(data_dir, "dataset.csv")
 
@@ -34,8 +32,9 @@ class MusicRecommendationEngine:
 
             raw_df = pd.read_csv(dataset_path)
 
-            # 1. DEDUPLIKASI GLOBAL (Penting: Nama + Artis harus unik)
-            # Menjamin lagu seperti 'La Bachata' hanya muncul 1x meski punya banyak genre
+            # 1. DEDUPLIKASI GLOBAL: Nama + Artis unik
+            # Kita urutkan berdasarkan popularity agar saat drop_duplicates, 
+            # versi lagu yang paling populer yang tersimpan.
             _self.df = (
                 raw_df.sort_values('popularity', ascending=False)
                       .drop_duplicates(subset=['track_name', 'artists'], keep='first')
@@ -43,7 +42,7 @@ class MusicRecommendationEngine:
                       .copy()
             )
 
-            # 2. LOAD MODEL & ENCODER (Lokasi sesuai struktur Anda)
+            # 2. LOAD MODEL & ENCODER
             try:
                 model_path = os.path.join(data_dir, "music_mood_model.pkl")
                 encoder_path = os.path.join(data_dir, "label_encoder.pkl")
@@ -53,14 +52,11 @@ class MusicRecommendationEngine:
                 _self.model = None
                 _self.label_encoder = None
 
-            # 3. PROSES MOOD
             _self._add_mood_column()
-            
-            # 4. LIST GENRE DARI DATA YANG SUDAH BERSIH
             _self.genres = sorted(_self.df['track_genre'].unique().tolist())
             
         except Exception as e:
-            raise RuntimeError(f"Gagal memuat data. Error: {e}")
+            raise RuntimeError(f"Gagal memuat data: {e}")
 
     def _classify_mood_rule_based(self, row):
         v, e = row['valence'], row['energy']
@@ -80,26 +76,43 @@ class MusicRecommendationEngine:
         self.df['mood'] = self.df.apply(self._classify_mood_rule_based, axis=1)
 
     # ===============================================================
-    # REKOMENDASI: ACAK TOTAL (TIDAK BOLEH PAKAI SORT DI AKHIR)
+    # REKOMENDASI: WEIGHTED RANDOM (POPULARITY-BASED)
     # ===============================================================
 
     def get_recommendations_by_mood(self, mood, n=10):
         filtered = self.df[self.df['mood'] == mood].copy()
         if filtered.empty: return pd.DataFrame()
         
-        # Ambil n sampel secara acak dari seluruh dataset yang cocok
-        # random_state=None memastikan hasil berbeda setiap kali diklik
-        return filtered.sample(n=min(n, len(filtered)), random_state=None)[self._output_columns()]
+        # Mengambil 200 lagu terpopuler sebagai 'pool' utama
+        top_pool = filtered.head(200)
+        
+        # Menggunakan kolom 'popularity' sebagai bobot pengacak.
+        # Lagu dengan popularity 100 akan jauh lebih sering muncul dibanding popularity 10,
+        # tapi urutan dan pilihannya tetap akan berubah-ubah (acak).
+        recommendations = top_pool.sample(
+            n=min(n, len(top_pool)), 
+            weights='popularity', 
+            random_state=None
+        )
+        
+        # Urutkan hasil akhir berdasarkan popularitas agar tampilan rapi
+        return recommendations.sort_values(by='popularity', ascending=False)[self._output_columns()]
 
     def get_recommendations_by_genre(self, genre, n=10):
         filtered = self.df[self.df['track_genre'] == genre].copy()
         if filtered.empty: return pd.DataFrame()
-        return filtered.sample(n=min(n, len(filtered)), random_state=None)[self._output_columns()]
+        
+        top_pool = filtered.head(200)
+        recommendations = top_pool.sample(n=min(n, len(top_pool)), weights='popularity', random_state=None)
+        return recommendations.sort_values(by='popularity', ascending=False)[self._output_columns()]
 
     def get_recommendations_by_mood_and_genre(self, mood, genre, n=10):
         filtered = self.df[(self.df['mood'] == mood) & (self.df['track_genre'] == genre)].copy()
         if filtered.empty: return pd.DataFrame()
-        return filtered.sample(n=min(n, len(filtered)), random_state=None)[self._output_columns()]
+        
+        # Karena filter mood+genre lebih spesifik, kita gunakan seluruh data yang tersedia
+        recommendations = filtered.sample(n=min(n, len(filtered)), weights='popularity', random_state=None)
+        return recommendations.sort_values(by='popularity', ascending=False)[self._output_columns()]
 
     # ===============================================================
     # HELPERS

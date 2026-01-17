@@ -1,7 +1,7 @@
 """
 Music Recommendation Engine
 Handles music data loading, mood classification, and recommendations
-(FIXED: No duplicate songs based on track_id)
+(FIXED: Global deduplication to prevent duplicate songs in chatbot)
 """
 
 import pandas as pd
@@ -10,11 +10,10 @@ import joblib
 import os
 import streamlit as st
 
-
 class MusicRecommendationEngine:
     """
     Modular music recommendation engine
-    Deduplicated by track_id
+    Deduplicated by track_name and artists to ensure unique recommendations
     """
 
     def __init__(self):
@@ -26,18 +25,28 @@ class MusicRecommendationEngine:
         self._load_data()
 
     # ===============================
-    # LOAD DATA
+    # LOAD DATA (FIXED: Global Deduplication)
     # ===============================
     @st.cache_resource
     def _load_data(_self):
         try:
             current_dir = os.path.dirname(__file__)
             data_dir = os.path.join(current_dir, "..", "data", "music")
-
             dataset_path = os.path.join(data_dir, "dataset.csv")
-            _self.df = pd.read_csv(dataset_path)
+            
+            # 1. Load raw data
+            raw_df = pd.read_csv(dataset_path)
 
-            # Load trained model (optional)
+            # 2. PERBAIKAN: Deduplikasi Global
+            # Menggunakan track_name & artists karena lagu yang sama bisa punya track_id berbeda
+            # Kita urutkan berdasarkan popularity agar mendapatkan versi yang paling populer
+            _self.df = (
+                raw_df.sort_values('popularity', ascending=False)
+                      .drop_duplicates(subset=['track_name', 'artists'], keep='first')
+                      .copy()
+            )
+
+            # 3. Load trained model (optional)
             try:
                 model_path = os.path.join(data_dir, "music_mood_model.pkl")
                 encoder_path = os.path.join(data_dir, "label_encoder.pkl")
@@ -50,10 +59,12 @@ class MusicRecommendationEngine:
                 _self.label_encoder = None
                 print("⚠️ Using rule-based mood classification")
 
+            # 4. Add mood column to the cleaned data
             _self._add_mood_column()
 
+            # 5. Get unique genres from cleaned data
             _self.genres = sorted(_self.df['track_genre'].unique().tolist())
-            print(f"🎵 Dataset loaded: {len(_self.df)} rows")
+            print(f"🎵 Dataset loaded & cleaned: {len(_self.df)} unique songs")
 
         except Exception as e:
             raise RuntimeError(f"Failed to load data: {e}")
@@ -96,12 +107,11 @@ class MusicRecommendationEngine:
     # ===============================
     def _deduplicate(self, df):
         """
-        Remove duplicate songs based on track_id
-        Keep the most popular version
+        Helper untuk memastikan data yang difilter tetap unik
         """
         return (
             df.sort_values('popularity', ascending=False)
-              .drop_duplicates(subset='track_id', keep='first')
+              .drop_duplicates(subset=['track_name', 'artists'], keep='first')
         )
 
     # ===============================
@@ -115,6 +125,7 @@ class MusicRecommendationEngine:
         if filtered.empty:
             return pd.DataFrame()
 
+        # Data sudah bersih di awal, tapi kita panggil dedup lagi untuk keamanan
         filtered = self._deduplicate(filtered)
 
         pool_size = min(len(filtered), max(n * 2, n))
@@ -163,7 +174,7 @@ class MusicRecommendationEngine:
         return recommendations[self._output_columns()]
 
     # ===============================
-    # ANALYTICS
+    # ANALYTICS & HELPERS
     # ===============================
     def get_mood_distribution(self):
         return self.df['mood'].value_counts().to_dict()
@@ -185,9 +196,6 @@ class MusicRecommendationEngine:
             .round(3)
         )
 
-    # ===============================
-    # SPOTIFY HELPERS
-    # ===============================
     @staticmethod
     def create_spotify_embed(track_id, width=300, height=380):
         return f"""
@@ -197,14 +205,6 @@ class MusicRecommendationEngine:
         </iframe>
         """
 
-    @staticmethod
-    def create_spotify_search_link(track_name, artist):
-        query = f"{track_name} {artist}".replace(" ", "+")
-        return f"https://open.spotify.com/search/{query}"
-
-    # ===============================
-    # UTILITIES
-    # ===============================
     def _output_columns(self):
         return [
             'track_name', 'artists', 'album_name',
@@ -218,11 +218,3 @@ class MusicRecommendationEngine:
 
     def get_available_moods(self):
         return self.moods
-
-    def get_dataset_info(self):
-        return {
-            'total_songs': len(self.df),
-            'total_genres': len(self.genres),
-            'total_artists': self.df['artists'].nunique(),
-            'moods': self.get_mood_distribution()
-        }

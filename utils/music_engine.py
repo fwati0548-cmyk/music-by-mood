@@ -106,27 +106,15 @@ class MusicRecommendationEngine:
         filtered = self.df[self.df['mood'] == mood]
         if filtered.empty:
             return pd.DataFrame()
-            
-        filtered = (
-            filtered
-            .sort_values ('popularity', ascending=False)
-            .drop_duplicates(subset='track_id', keep='first')
-        )
 
         # Ambil pool 100 lagu terpopuler, lalu acak n lagu
-        pool_size = min(len(filtered), max( n * 2, n)
-        top_pool = filtered.head(pool_size)
+        pool_size = min(len(filtered), 100)
+        top_pool = filtered.nlargest(pool_size, 'popularity')
+        
+        sample_size = min(len(top_pool), n)
+        recommendations = top_pool.sample(n=sample_size).sort_values(by='popularity', ascending=False)
 
-        if len(top_pool) > n:
-          recommendations = (
-            top_pool
-            .sample(n=n, random_state=None)
-            .sort_values(by='popularity', ascending=False)
-               )
-    else:
-       recommendations = top_pool
-       
-    return recommendations[['track_name', 'artists', 'album_name',
+        return recommendations[['track_name', 'artists', 'album_name',
                                'track_id', 'popularity', 'valence',
                                'energy', 'track_genre', 'mood']]
 

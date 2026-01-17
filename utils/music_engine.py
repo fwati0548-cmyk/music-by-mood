@@ -22,7 +22,7 @@ class MusicRecommendationEngine:
             
             raw_df = pd.read_csv(dataset_path)
 
-            # DEDUPLIKASI GLOBAL (Agar tidak ada lagu dobel walau beda genre)
+            # DEDUPLIKASI GLOBAL: Menghapus lagu duplikat berdasarkan Nama & Artis
             _self.df = (
                 raw_df.sort_values('popularity', ascending=False)
                       .drop_duplicates(subset=['track_name', 'artists'], keep='first')
@@ -60,25 +60,37 @@ class MusicRecommendationEngine:
             except: pass
         self.df['mood'] = self.df.apply(self._classify_mood_rule_based, axis=1)
 
-    # --- RECOMMENDATION METHODS ---
+    # --- PERBAIKAN REKOMENDASI AGAR VARIATIF (TIDAK ITU-ITU SAJA) ---
+
     def get_recommendations_by_mood(self, mood, n=10):
         filtered = self.df[self.df['mood'] == mood].copy()
         if filtered.empty: return pd.DataFrame()
-        pool = filtered.head(min(len(filtered), 50))
+        
+        # PERUBAHAN: Menghapus .head(50). Sekarang mengambil sampel dari RIBUAN lagu yang tersedia.
+        # Kita beri pool yang lebih besar (misal 500 lagu terpopuler) agar tetap berkualitas tapi variatif
+        pool_size = min(len(filtered), 500) 
+        pool = filtered.head(pool_size) 
+        
+        # Mengacak hasil agar setiap request memberikan lagu berbeda
         return pool.sample(n=min(n, len(pool))).sort_values(by='popularity', ascending=False)[self._output_columns()]
 
     def get_recommendations_by_genre(self, genre, n=10):
         filtered = self.df[self.df['track_genre'] == genre].copy()
         if filtered.empty: return pd.DataFrame()
-        pool = filtered.head(min(len(filtered), 50))
+        
+        pool_size = min(len(filtered), 500)
+        pool = filtered.head(pool_size)
+        
         return pool.sample(n=min(n, len(pool))).sort_values(by='popularity', ascending=False)[self._output_columns()]
 
     def get_recommendations_by_mood_and_genre(self, mood, genre, n=10):
         filtered = self.df[(self.df['mood'] == mood) & (self.df['track_genre'] == genre)].copy()
         if filtered.empty: return pd.DataFrame()
+        
+        # Untuk kombinasi mood + genre, kita ambil semua yang tersedia karena jumlahnya lebih sedikit
         return filtered.sample(n=min(n, len(filtered))).sort_values(by='popularity', ascending=False)[self._output_columns()]
 
-    # --- HELPERS (PASTIKAN ADA DAN @STATICMETHOD) ---
+    # --- HELPERS ---
     @staticmethod
     def create_spotify_embed(track_id, width=300, height=380):
         return f"""

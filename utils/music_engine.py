@@ -1,7 +1,7 @@
 """
 Music Recommendation Engine
 Handles music data loading, mood classification, and recommendations
-(FIXED: Global deduplication to prevent duplicate songs in chatbot)
+(FIXED: Menghapus duplikat lagu yang memiliki genre berbeda-beda)
 """
 
 import pandas as pd
@@ -13,7 +13,7 @@ import streamlit as st
 class MusicRecommendationEngine:
     """
     Modular music recommendation engine
-    Deduplicated by track_name and artists to ensure unique recommendations
+    Sistem ini memfilter lagu agar satu lagu hanya muncul satu kali meskipun memiliki banyak genre.
     """
 
     def __init__(self):
@@ -25,7 +25,7 @@ class MusicRecommendationEngine:
         self._load_data()
 
     # ===============================
-    # LOAD DATA (FIXED: Global Deduplication)
+    # LOAD DATA & FILTER DUPLIKAT
     # ===============================
     @st.cache_resource
     def _load_data(_self):
@@ -34,19 +34,20 @@ class MusicRecommendationEngine:
             data_dir = os.path.join(current_dir, "..", "data", "music")
             dataset_path = os.path.join(data_dir, "dataset.csv")
             
-            # 1. Load raw data
+            # 1. Load dataset asli
             raw_df = pd.read_csv(dataset_path)
 
-            # 2. PERBAIKAN: Deduplikasi Global
-            # Menggunakan track_name & artists karena lagu yang sama bisa punya track_id berbeda
-            # Kita urutkan berdasarkan popularity agar mendapatkan versi yang paling populer
+            # 2. PROSES FILTER UTAMA:
+            # Urutkan berdasarkan popularitas tertinggi, lalu hapus duplikat
+            # berdasarkan Nama Lagu dan Artis. Ini memastikan jika satu lagu punya 
+            # 5 genre berbeda, hanya 1 genre (dari baris paling populer) yang diambil.
             _self.df = (
                 raw_df.sort_values('popularity', ascending=False)
                       .drop_duplicates(subset=['track_name', 'artists'], keep='first')
                       .copy()
             )
 
-            # 3. Load trained model (optional)
+            # 3. Load trained model (jika ada)
             try:
                 model_path = os.path.join(data_dir, "music_mood_model.pkl")
                 encoder_path = os.path.join(data_dir, "label_encoder.pkl")
@@ -59,12 +60,12 @@ class MusicRecommendationEngine:
                 _self.label_encoder = None
                 print("⚠️ Using rule-based mood classification")
 
-            # 4. Add mood column to the cleaned data
+            # 4. Tambahkan kolom mood pada data yang sudah bersih
             _self._add_mood_column()
 
-            # 5. Get unique genres from cleaned data
+            # 5. Ambil daftar genre unik dari data yang sudah difilter
             _self.genres = sorted(_self.df['track_genre'].unique().tolist())
-            print(f"🎵 Dataset loaded & cleaned: {len(_self.df)} unique songs")
+            print(f"🎵 Dataset Ready: {len(_self.df)} lagu unik dimuat.")
 
         except Exception as e:
             raise RuntimeError(f"Failed to load data: {e}")
@@ -88,11 +89,8 @@ class MusicRecommendationEngine:
     def _add_mood_column(self):
         if self.model is not None and self.label_encoder is not None:
             try:
-                features = [
-                    'danceability', 'energy', 'valence', 'tempo',
-                    'acousticness', 'instrumentalness',
-                    'loudness', 'speechiness'
-                ]
+                features = ['danceability', 'energy', 'valence', 'tempo', 
+                            'acousticness', 'instrumentalness', 'loudness', 'speechiness']
                 X = self.df[features]
                 mood_encoded = self.model.predict(X)
                 self.df['mood'] = self.label_encoder.inverse_transform(mood_encoded)
@@ -103,31 +101,19 @@ class MusicRecommendationEngine:
         self.df['mood'] = self.df.apply(self._classify_mood_rule_based, axis=1)
 
     # ===============================
-    # CORE DEDUP FUNCTION
-    # ===============================
-    def _deduplicate(self, df):
-        """
-        Helper untuk memastikan data yang difilter tetap unik
-        """
-        return (
-            df.sort_values('popularity', ascending=False)
-              .drop_duplicates(subset=['track_name', 'artists'], keep='first')
-        )
-
-    # ===============================
     # RECOMMENDATION METHODS
     # ===============================
     def get_recommendations_by_mood(self, mood, n=10):
         if mood not in self.moods:
             raise ValueError(f"Mood must be one of {self.moods}")
 
+        # Filter berdasarkan mood (Data sudah pasti unik karena proses di awal)
         filtered = self.df[self.df['mood'] == mood]
+        
         if filtered.empty:
             return pd.DataFrame()
 
-        # Data sudah bersih di awal, tapi kita panggil dedup lagi untuk keamanan
-        filtered = self._deduplicate(filtered)
-
+        # Ambil sampel secara acak dari pool lagu terpopuler
         pool_size = min(len(filtered), max(n * 2, n))
         top_pool = filtered.head(pool_size)
 
@@ -140,10 +126,9 @@ class MusicRecommendationEngine:
 
     def get_recommendations_by_genre(self, genre, n=10):
         filtered = self.df[self.df['track_genre'] == genre]
+        
         if filtered.empty:
             return pd.DataFrame()
-
-        filtered = self._deduplicate(filtered)
 
         pool_size = min(len(filtered), max(n * 2, n))
         top_pool = filtered.head(pool_size)
@@ -157,14 +142,12 @@ class MusicRecommendationEngine:
 
     def get_recommendations_by_mood_and_genre(self, mood, genre, n=10):
         filtered = self.df[
-            (self.df['mood'] == mood) &
+            (self.df['mood'] == mood) & 
             (self.df['track_genre'] == genre)
         ]
 
         if filtered.empty:
             return pd.DataFrame()
-
-        filtered = self._deduplicate(filtered)
 
         recommendations = (
             filtered.sample(n=min(n, len(filtered)))
@@ -174,43 +157,12 @@ class MusicRecommendationEngine:
         return recommendations[self._output_columns()]
 
     # ===============================
-    # ANALYTICS & HELPERS
+    # UTILITIES
     # ===============================
-    def get_mood_distribution(self):
-        return self.df['mood'].value_counts().to_dict()
-
-    def get_genre_distribution(self, mood=None):
-        df = self.df[self.df['mood'] == mood] if mood else self.df
-        return df['track_genre'].value_counts().head(20).to_dict()
-
-    def get_mood_stats(self):
-        return (
-            self.df.groupby('mood')
-            .agg({
-                'valence': 'mean',
-                'energy': 'mean',
-                'danceability': 'mean',
-                'acousticness': 'mean',
-                'popularity': 'mean'
-            })
-            .round(3)
-        )
-
-    @staticmethod
-    def create_spotify_embed(track_id, width=300, height=380):
-        return f"""
-        <iframe src="https://open.spotify.com/embed/track/{track_id}"
-                width="{width}" height="{height}"
-                frameborder="0" allow="encrypted-media">
-        </iframe>
-        """
-
     def _output_columns(self):
         return [
-            'track_name', 'artists', 'album_name',
-            'track_id', 'popularity',
-            'valence', 'energy',
-            'track_genre', 'mood'
+            'track_name', 'artists', 'album_name', 
+            'track_id', 'popularity', 'track_genre', 'mood'
         ]
 
     def get_available_genres(self):

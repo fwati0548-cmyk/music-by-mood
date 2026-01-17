@@ -64,7 +64,7 @@ st.markdown("""
     .feature-title {
         font-size: 2rem;
         font-weight: 700;
-        color: #F1F5F9;
+        color: #000000;
         margin-bottom: 1rem;
     }
 

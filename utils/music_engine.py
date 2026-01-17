@@ -124,7 +124,7 @@ class MusicRecommendationEngine:
             .sort_values(by='popularity', ascending=False)
                )
     else:
-            recommendations = top_pool
+       recommendations = top_pool
        
     return recommendations[['track_name', 'artists', 'album_name',
                                'track_id', 'popularity', 'valence',

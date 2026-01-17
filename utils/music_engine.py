@@ -1,8 +1,9 @@
 """
-Music Recommendation Engine - VERSION 2.5
-- Lokasi: utils/music_engine.py
-- Fitur: Weighted Random Sampling (Prioritas Popularitas Tinggi + Tetap Variatif)
+Music Recommendation Engine
+Location: utils/music_engine.py
+Target Data: data/music/dataset.csv
 """
+
 import pandas as pd
 import numpy as np
 import joblib
@@ -21,13 +22,20 @@ class MusicRecommendationEngine:
     @st.cache_resource
     def _load_data(_self):
         try:
+            # current_dir adalah folder 'utils'
             current_dir = os.path.dirname(__file__)
-            data_dir = os.path.join(current_dir, "..", "data", "music")
-            dataset_path = os.path.join(data_dir, "dataset.csv")
             
+            # Keluar dari utils (..), masuk ke data/music
+            data_dir = os.path.normpath(os.path.join(current_dir, "..", "data", "music"))
+            dataset_path = os.path.join(data_dir, "dataset.csv")
+
+            if not os.path.exists(dataset_path):
+                raise FileNotFoundError(f"File tidak ditemukan di: {dataset_path}")
+
             raw_df = pd.read_csv(dataset_path)
 
-            # DEDUPLIKASI GLOBAL: Menghapus lagu duplikat berdasarkan Nama & Artis
+            # 1. DEDUPLIKASI GLOBAL (Penting: Nama + Artis harus unik)
+            # Menjamin lagu seperti 'La Bachata' hanya muncul 1x meski punya banyak genre
             _self.df = (
                 raw_df.sort_values('popularity', ascending=False)
                       .drop_duplicates(subset=['track_name', 'artists'], keep='first')
@@ -35,19 +43,24 @@ class MusicRecommendationEngine:
                       .copy()
             )
 
+            # 2. LOAD MODEL & ENCODER (Lokasi sesuai struktur Anda)
             try:
                 model_path = os.path.join(data_dir, "music_mood_model.pkl")
                 encoder_path = os.path.join(data_dir, "label_encoder.pkl")
                 _self.model = joblib.load(model_path)
                 _self.label_encoder = joblib.load(encoder_path)
-            except Exception:
+            except:
                 _self.model = None
                 _self.label_encoder = None
 
+            # 3. PROSES MOOD
             _self._add_mood_column()
+            
+            # 4. LIST GENRE DARI DATA YANG SUDAH BERSIH
             _self.genres = sorted(_self.df['track_genre'].unique().tolist())
+            
         except Exception as e:
-            raise RuntimeError(f"Failed to load data: {e}")
+            raise RuntimeError(f"Gagal memuat data. Error: {e}")
 
     def _classify_mood_rule_based(self, row):
         v, e = row['valence'], row['energy']
@@ -59,56 +72,47 @@ class MusicRecommendationEngine:
     def _add_mood_column(self):
         if self.model and self.label_encoder:
             try:
-                features = ['danceability', 'energy', 'valence', 'tempo', 'acousticness', 'instrumentalness', 'loudness', 'speechiness']
+                features = ['danceability', 'energy', 'valence', 'tempo', 
+                            'acousticness', 'instrumentalness', 'loudness', 'speechiness']
                 self.df['mood'] = self.label_encoder.inverse_transform(self.model.predict(self.df[features]))
                 return
             except: pass
         self.df['mood'] = self.df.apply(self._classify_mood_rule_based, axis=1)
 
-    # --- PERBAIKAN REKOMENDASI AGAR VARIATIF (TIDAK ITU-ITU SAJA) ---
+    # ===============================================================
+    # REKOMENDASI: ACAK TOTAL (TIDAK BOLEH PAKAI SORT DI AKHIR)
+    # ===============================================================
 
     def get_recommendations_by_mood(self, mood, n=10):
         filtered = self.df[self.df['mood'] == mood].copy()
         if filtered.empty: return pd.DataFrame()
         
-        # PERUBAHAN: Menghapus .head(50). Sekarang mengambil sampel dari RIBUAN lagu yang tersedia.
-        # Kita beri pool yang lebih besar (misal 500 lagu terpopuler) agar tetap berkualitas tapi variatif
-        pool_size = min(len(filtered), 500) 
-        pool = filtered.head(pool_size) 
-        
-        # Mengacak hasil agar setiap request memberikan lagu berbeda
-        return pool.sample(n=min(n, len(pool))).sort_values(by='popularity', ascending=False)[self._output_columns()]
+        # Ambil n sampel secara acak dari seluruh dataset yang cocok
+        # random_state=None memastikan hasil berbeda setiap kali diklik
+        return filtered.sample(n=min(n, len(filtered)), random_state=None)[self._output_columns()]
 
     def get_recommendations_by_genre(self, genre, n=10):
         filtered = self.df[self.df['track_genre'] == genre].copy()
         if filtered.empty: return pd.DataFrame()
-        
-        pool_size = min(len(filtered), 500)
-        pool = filtered.head(pool_size)
-        
-        return pool.sample(n=min(n, len(pool))).sort_values(by='popularity', ascending=False)[self._output_columns()]
+        return filtered.sample(n=min(n, len(filtered)), random_state=None)[self._output_columns()]
 
     def get_recommendations_by_mood_and_genre(self, mood, genre, n=10):
         filtered = self.df[(self.df['mood'] == mood) & (self.df['track_genre'] == genre)].copy()
         if filtered.empty: return pd.DataFrame()
-        
-        # Untuk kombinasi mood + genre, kita ambil semua yang tersedia karena jumlahnya lebih sedikit
-        return filtered.sample(n=min(n, len(filtered))).sort_values(by='popularity', ascending=False)[self._output_columns()]
+        return filtered.sample(n=min(n, len(filtered)), random_state=None)[self._output_columns()]
 
-    # --- HELPERS ---
+    # ===============================================================
+    # HELPERS
+    # ===============================================================
+
     @staticmethod
     def create_spotify_embed(track_id, width=300, height=380):
         return f"""
         <iframe src="https://open.spotify.com/embed/track/{track_id}"
                 width="{width}" height="{height}"
-                frameborder="0" allow="encrypted-media">
+                frameborder="0" allowtransparency="true" allow="encrypted-media">
         </iframe>
         """
-
-    @staticmethod
-    def create_spotify_search_link(track_name, artist):
-        query = f"{track_name} {artist}".replace(" ", "+")
-        return f"https://open.spotify.com/search/{query}"
 
     def _output_columns(self):
         return ['track_name', 'artists', 'album_name', 'track_id', 'popularity', 'track_genre', 'mood']

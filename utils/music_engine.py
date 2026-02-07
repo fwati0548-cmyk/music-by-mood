@@ -82,11 +82,33 @@ class MusicRecommendationEngine:
     # ===============================================================
     # REKOMENDASI: ACAK TOTAL (TIDAK BOLEH PAKAI SORT DI AKHIR)
     # ===============================================================
+    # === TAMBAHKAN KODE INI DI DALAM CLASS MusicRecommendationEngine ===
+
     def get_mood_distribution(self):
-        """Menghitung jumlah lagu per mood untuk Pie Chart"""
+        """Menghitung jumlah lagu per mood untuk statistik dan Pie Chart"""
         if self.df is not None:
             return self.df['mood'].value_counts().to_dict()
         return {mood: 0 for mood in self.moods}
+
+    def get_genre_distribution(self, mood=None):
+        """Menghitung distribusi genre untuk Bar Chart"""
+        df_to_use = self.df
+        if mood and mood != "All Moods":
+            df_to_use = self.df[self.df['mood'] == mood]
+        
+        if df_to_use is not None:
+            # Mengambil 10 genre teratas agar grafik tidak berantakan
+            return df_to_use['track_genre'].value_counts().to_dict()
+        return {}
+
+    def get_mood_stats(self):
+        """Menghitung rata-rata fitur audio per mood untuk Radar Chart"""
+        if self.df is not None:
+            features = ['danceability', 'energy', 'valence', 'acousticness', 'instrumentalness']
+            # Mengelompokkan berdasarkan mood dan mengambil rata-rata fitur audionya
+            stats = self.df.groupby('mood')[features].mean()
+            return stats
+        return pd.DataFrame()
         
     def get_recommendations_by_mood(self, mood, n=10):
         filtered = self.df[self.df['mood'] == mood].copy()

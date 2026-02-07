@@ -82,7 +82,12 @@ class MusicRecommendationEngine:
     # ===============================================================
     # REKOMENDASI: ACAK TOTAL (TIDAK BOLEH PAKAI SORT DI AKHIR)
     # ===============================================================
-
+    def get_mood_distribution(self):
+        """Menghitung jumlah lagu per mood untuk Pie Chart"""
+        if self.df is not None:
+            return self.df['mood'].value_counts().to_dict()
+        return {mood: 0 for mood in self.moods}
+        
     def get_recommendations_by_mood(self, mood, n=10):
         filtered = self.df[self.df['mood'] == mood].copy()
         if filtered.empty: return pd.DataFrame()
